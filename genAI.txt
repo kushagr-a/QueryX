@@ -1,0 +1,322 @@
+Generative AI
+==============
+
+Generative AI ka matlab hai aisa AI jo naya content generate karta hai:
+
+- text
+- code
+- image
+- audio
+- video
+
+Examples: ChatGPT text/code generate karta hai, image models images generate
+karte hain, aur speech models audio generate karte hain.
+
+
+AI service provider
+===================
+
+AI service provider generally teen tarah ka kaam kar sakta hai:
+
+1. LLM ko train karna
+   - Bahut bade dataset par model ke parameters/weights learn karna.
+   - Training ke baad model language ke patterns, facts aur reasoning
+     behaviour seekhta hai.
+
+2. LLM ko host/serve karna
+   - Model ko servers/GPU par run karna.
+   - Scaling, latency, availability aur security manage karna.
+
+3. API provide karna
+   - Application ko model se baat karne ke liye endpoint/SDK dena.
+   - Application request mein prompt/messages bhejti hai aur response receive
+     karti hai.
+
+
+Sabse important concept: LLM stateless kyon hota hai?
+======================================================
+
+LLM ko ek function ki tarah samjho:
+
+    response = LLM(input)
+
+Har API call normally independent hoti hai. Model request process karta hai,
+response generate karta hai, aur request khatam hone ke baad us conversation ko
+automatically yaad rakhna API ki responsibility nahi hoti.
+
+Example:
+
+Request 1:
+    User: Mera naam Rahul hai.
+    AI: Hello Rahul!
+
+Request 2:
+    User: Mera naam kya hai?
+
+Agar Request 2 mein Request 1 ka context dobara nahi bheja gaya, to stateless
+LLM ke paas "Rahul" jaanne ka koi input nahi hai. Woh keh sakta hai:
+    "Mujhe aapka naam nahi pata."
+
+Iska matlab yeh nahi hai ki model trained information bhool gaya. Training ke
+dauran seekhe gaye weights model ke andar available rehte hain. "Conversation
+memory" alag cheez hai: kisi particular user ya chat ke previous messages.
+
+Statelessness ka fayda:
+
+- har request predictable hoti hai
+- servers ko kisi ek user ka session memory mein rakhna zaroori nahi
+- horizontal scaling easy hoti hai; koi bhi server request handle kar sakta hai
+- server restart hone par in-memory conversation automatically lose nahi hoti,
+  kyunki permanent history application/database mein hoti hai
+
+
+Phir ChatGPT ko first message kaise pata hota hai?
+===================================================
+
+Actually ChatGPT/hamari application har baar relevant previous messages ko
+request ke andar include karti hai. Model khud background mein previous message
+nahi dekh raha hota; application context assemble karke bhej rahi hoti hai.
+
+User ka chat:
+
+    User: Mera naam Rahul hai.
+    AI: Hello Rahul!
+    User: Mera naam kya hai?
+
+Application next API request ko logically aise bhej sakti hai:
+
+    messages = [
+      { role: "user",      content: "Mera naam Rahul hai." },
+      { role: "assistant", content: "Hello Rahul!" },
+      { role: "user",      content: "Mera naam kya hai?" }
+    ]
+
+LLM is poore input ko dekh kar answer deta hai:
+
+    "Aapka naam Rahul hai."
+
+Isliye sahi statement yeh hai:
+
+    LLM usually stateless hota hai, lekin application state/context manage
+    karke har request ke saath model ko relevant history bhejti hai.
+
+
+Memory ke types
+===============
+
+1. Local memory / in-process memory
+-----------------------------------
+
+Conversation ko application ke RAM mein store karna:
+
+    chatHistory[userId].push(message)
+
+Pros:
+- bahut fast
+- simple prototype ke liye useful
+
+Cons:
+- server restart hote hi data lose ho sakta hai
+- multiple server instances mein state inconsistent ho sakti hai
+- memory badhne par RAM consume hoti hai
+
+Use case: learning/demo app ya short-lived development session.
+
+
+2. Session memory
+-----------------
+
+Ek session/thread/conversation ID ke saath messages associate karna:
+
+    userId = 42
+    conversationId = "conversation-abc"
+
+User ke har request ke saath conversationId jaata hai. Backend us ID se
+relevant messages fetch karke LLM ko bhejta hai.
+
+Session memory ka scope usually ek chat/session tak hota hai. New chat start
+karne par new conversationId milta hai, isliye purani chat automatically
+context mein nahi aati.
+
+
+3. Chat history / persistent memory
+-----------------------------------
+
+Messages ko database mein save karna:
+
+    conversations
+    messages
+
+Typical message fields:
+
+- conversationId
+- userId
+- role: system/user/assistant/tool
+- content
+- timestamp
+
+Request flow:
+
+1. User message frontend se backend par aata hai.
+2. Backend user message ko database mein save karta hai.
+3. Backend conversation ke previous messages retrieve karta hai.
+4. Zaroori context ke saath LLM API call karta hai.
+5. AI response database mein save karta hai.
+6. Response frontend ko return karta hai.
+
+Isse server restart, login from another device, aur long-term conversation
+continue karna possible hota hai.
+
+
+4. Long-term semantic memory
+----------------------------
+
+Har purane message ko har request mein bhejna expensive hota hai. Isliye
+important facts ko extract karke vector database ya normal database mein store
+kiya ja sakta hai:
+
+    "User Rahul ko Python pasand hai."
+    "User ka preferred language Hindi hai."
+
+New question par application semantic search se sirf relevant memories nikalti
+hai aur prompt mein add karti hai. Is process ko Retrieval-Augmented
+Generation (RAG) ya memory retrieval pattern ke saath implement kiya ja sakta
+hai.
+
+Important distinction:
+
+- Chat history = exact previous messages
+- Summary memory = previous conversation ka short summary
+- Semantic memory = future mein useful facts/preferences
+- Model training = sab users ke liye general knowledge/behaviour
+
+User ki personal memory automatically model training nahi ban jaati. Application
+ko explicitly decide karna hota hai ki kya save, retrieve aur delete karna hai.
+
+
+Context window aur token limit
+==============================
+
+LLM unlimited messages accept nahi karta. Request ka context window limited
+hota hai, aur messages tokens mein count hote hain. Agar puri history limit se
+badi ho jaaye, to application ko:
+
+- oldest messages truncate karne
+- conversation ka summary banane
+- relevant messages retrieve karne
+- recent messages ko priority dene
+
+jaise techniques use karni padti hain.
+
+Ek practical prompt ka structure kuch aisa ho sakta hai:
+
+    [system instructions]
+    [retrieved user preferences/facts]
+    [conversation summary]
+    [recent chat messages]
+    [new user message]
+
+Model ka answer in supplied tokens par based hota hai. Context bhejna memory
+management ka core mechanism hai.
+
+
+Complete architecture example
+=============================
+
+    Frontend
+       |
+       | userId, conversationId, newMessage
+       v
+    Backend/API
+       |
+       | 1. authenticate user
+       | 2. load history from DB
+       | 3. retrieve relevant memory
+       | 4. build messages/prompt
+       v
+    LLM API
+       |
+       | response
+       v
+    Backend
+       |
+       | save user message + AI response
+       v
+    Database
+
+Pseudo-code:
+
+    async function chat(userId, conversationId, userText) {
+      await saveMessage(conversationId, "user", userText);
+
+      const recentMessages = await loadRecentMessages(conversationId);
+      const memories = await searchRelevantMemories(userId, userText);
+
+      const messages = buildPrompt({
+        systemInstructions,
+        memories,
+        recentMessages,
+        userText
+      });
+
+      const answer = await callLLM(messages);
+      await saveMessage(conversationId, "assistant", answer);
+
+      return answer;
+    }
+
+Production considerations:
+
+- authorization check karo: user kisi doosre user ki conversation na padh sake
+- conversationId ko userId ke saath validate karo
+- token budget aur rate limits manage karo
+- sensitive data ko unnecessarily store mat karo
+- history delete/export karne ka option do
+- failures par duplicate messages avoid karne ke liye idempotency handle karo
+
+
+Ek simple analogy
+=================
+
+LLM ek knowledgeable consultant jaisa hai jo har meeting ke end par notebook
+band kar deta hai. Agli meeting mein agar aap purani notebook ke relevant
+pages lekar jaate ho, to consultant continuity ke saath answer de sakta hai.
+
+- consultant = LLM
+- notebook = database/chat history
+- relevant pages = retrieved context
+- pages ko meeting ke table par rakhna = prompt mein messages bhejna
+- notebook ka summary = conversation summarization
+
+
+Interview perspective: short answer
+====================================
+
+Question: "LLM stateless hota hai, phir chatbot ko previous messages kaise yaad
+rehta hai?"
+
+Answer:
+
+    LLM inference API generally stateless hoti hai. Model har request ko
+    independent input ke roop mein process karta hai. Chatbot application
+    conversationId ke basis par previous messages ko database/cache se load
+    karti hai, token limit ke hisaab se relevant history ya summary select
+    karti hai, aur us context ko current user message ke saath LLM ko bhejti
+    hai. LLM ko continuity isliye dikhti hai kyunki application har request
+    mein context dobara provide karti hai, na ki isliye ki model apne aap
+    users ki conversation permanently yaad rakhta hai.
+
+Follow-up points jo interview mein bol sakte ho:
+
+1. In-memory history fast hai, par restart aur horizontal scaling ke liye
+   unreliable hai.
+2. Redis short-term/session state ke liye aur SQL/NoSQL database durable chat
+   history ke liye use ho sakta hai.
+3. Long conversations mein truncation, summarization aur retrieval use karte
+   hain.
+4. Har request mein complete history bhejna latency, cost aur token-limit
+   problems create kar sakta hai.
+5. Memory aur model training alag concepts hain; saved chat automatically LLM
+   ke weights update nahi karti.
+6. Stateful chatbot ka state application layer manage karti hai; LLM service
+   khud stateless reh sakti hai.
